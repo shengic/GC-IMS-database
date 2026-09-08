@@ -1,3 +1,4 @@
+<!-- Version 1.0 -->
 # GC-IMS 量測資料庫 — 設計說明(白話版)
 
 本文件與 `schema/gcims_schema.sql` 搭配閱讀,記錄每一個設計決策的「為什麼」。
