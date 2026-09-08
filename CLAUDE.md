@@ -4,15 +4,17 @@ MySQL database + Tkinter desktop app for storing, searching, and quick-viewing
 G.A.S. FlavourSpec GC-IMS `.mea` files.
 
 ## Read first
-- `schema/gcims_schema.sql` — authoritative DDL (11 tables). Do not restructure without reading `docs/DESIGN.md`.
+- `schema/gcims_schema.sql` — authoritative DDL (14 tables + procedure + 2 triggers + 4 CHECK constraints). Do not restructure without reading `docs/DESIGN.md`.
 - `docs/DESIGN.md` — why the schema is designed this way. Every non-obvious decision is recorded there.
+- `scripts/mea_parser.py` — reference implementation of `split_mea` / `find_rip` / `promote` / `parse_telemetry`. Match this when writing any other .mea reader.
+- `tests/README.md` — QC plan, marker conventions (`db`, `testdb`, `slow`), and how to spin up `gc-ims_database_test`.
 
 ## .mea file format (verified on real file)
 - Text header: latin-1, `key = value` lines (key set varies by firmware), followed by the binary matrix. SPLIT METHOD: primary = arithmetic back-calculation (boundary = file_size - rows*cols*2, ints regex'd from leading text); secondary cross-check = first non-printable byte; the two must agree within a few bytes or the file is flagged parse_error (DESIGN.md §2b).
 - Binary body: int16 little-endian matrix, shape = (`Chunks count`, `Chunk sample count`) — e.g. 8571x4500 (fw 2.52) or 14289x3150 (fw 4.82). Byte count matches exactly: total_size - header_bytes = rows * cols * 2.
-- Signal polarity is PER-FILE (verified across three firmware generations: fw2.16 positive, fw2.52 negative, fw4.82 positive — no firmware-level rule exists). Detect at ingest from sign of RIP column mean, store in measurement.polarity, use it when rendering.
-- Header key SET and NAMES vary by firmware (51 keys fw2.16, 60 fw2.52, 68 fw4.82; telemetry keys renamed 'Flow Epc 1'->'Flow EPC IMS' etc.). ANY promoted key may be entirely absent (fw2.16 lacks GC Column, Drift Gas, drift-tube constants) -> header.get() semantics, NULL, never an error. Telemetry series count varies (2 to 5). Value formats drift ("Apr 25 2014" vs ISO dates; quoted "off"; 'xxx' placeholders) -> regex-extract numbers, multi-format dates, else NULL (raw always in header_json). Ingest uses HEADER_KEY_ALIASES; unknown keys -> header_json + header_key_registry, never a failure. See DESIGN.md §2b/§2c.
-- Validated against 4 file TYPES (3 firmware generations, 2014-2025); e.g. 77.1 MB (zstd 4.1x), 90.0 MB (zstd 3.7x). New file types follow the same cross-validation procedure (DESIGN.md 2b-2d).
+- Signal polarity is PER-FILE (verified across firmware generations 2.16/2.29/2.52/4.73/4.82 — no firmware-level rule exists). RIP detection uses VOCal-compatible method (matches GC-IMS-PEAK/rip.py for cross-tool alignment): argmax over RT=0 row after skipping first 200 drift samples. Signed value gives polarity; weak-RIP (winner < 3x row0 tail median) -> ingest_log 'ok_with_warnings'. See DESIGN §5b.
+- Header key SET and NAMES vary by firmware (51 keys fw2.16, 56 fw2.29, 60 fw2.52, 70 fw4.73 GC-IMS, 68 fw4.82). ANY promoted key may be absent -> header.get() semantics, NULL, never an error. Real key names differ from earliest design assumptions: `Firmware date` (lowercase d), `Chunk sample rate`, `Chunk trigger repetition` — see the consolidated HEADER_KEY_ALIASES table in DESIGN §2f. Telemetry series count varies (2 for fw≤2.29, 5 for fw 2.5x/4.82, 7 for fw 4.73 GC-IMS with pump-1). Two product lines exist: `FlavourSpec®`/`FlavourSpecR` (dual-EPC) and `GC-IMS` (pump-controlled, serial 5F1-xxxxx). Value formats drift ("Apr 25 2014" vs ISO dates; quoted "off"; 'xxx' placeholders) -> regex-extract numbers, multi-format dates, else NULL (raw always in header_json). Ingest uses HEADER_KEY_ALIASES; unknown keys -> header_json + header_key_registry, never a failure.
+- Validated against 8 file TYPES (5 firmware generations, 2014-2026, 5 instrument serials, 2 product lines); e.g. 77.1 MB (zstd 4.1x), 90.0 MB (zstd 3.7x), 151 MB (fw2.52 60-min ramp). New file types follow the same cross-validation procedure (DESIGN §2b-§2g). `.s.mea` filename extension is valid (fw 2.29 era) — glob both `*.mea` and `*.s.mea`.
 
 ## Non-negotiable architecture rules
 1. Everything lives in MySQL — no external file dependency at runtime.
@@ -24,8 +26,10 @@ G.A.S. FlavourSpec GC-IMS `.mea` files.
    - Original bytes in `mea_file` (ultimate provenance)
 3. Ingest must NEVER fail on unknown header keys: store all keys into header_json,
    promote only whitelisted keys, log new keys into `header_key_registry`.
-4. Heatmap rendering happens once at ingest, never per-search:
-   max-pool downsample (factors ~12x6 -> ~714x750) -> np.savez_compressed(matrix, rt_axis_s, dt_axis_ms) -> `mea_preview.preview_npz` (MEDIUMBLOB, ~370 KB).
+4. Heatmap generation is TWO-STAGE (DESIGN §5 step 8 / §5d):
+   - INGEST does max-pool ONCE (factors 12x6) -> np.savez_compressed(matrix, rt_axis_s, dt_axis_ms) -> `mea_preview.preview_npz` (MEDIUMBLOB, ~370-870 KB).
+     ingest leaves heatmap_png / thumb_png / png_render_ver NULL.
+   - `scripts/render_previews.py` fills PNGs later (readGAS-style matplotlib figure by default; --style raw for pixel dump). Reads only preview_npz + rip_drift_index — never re-decompresses mea_file. Selection modes: default (WHERE heatmap_png IS NULL), --render-ver-below N (recipe upgrade), --mea-id N, --force.
    Max-pool (not slicing) so narrow peaks survive downsampling.
 5. Search/list queries must NEVER select blob columns (`content`, `preview_npz`).
    Blobs fetched only by single-row primary-key lookup.
@@ -93,6 +97,20 @@ G.A.S. FlavourSpec GC-IMS `.mea` files.
   passwords via the `keyring` package only, NEVER in config files or code;
   status bar always shows active profile + read-only badge; read_only
   profiles disable all write features in the UI.
+
+## Ingest + QA workflow
+- `python scripts/ingest_mea.py "mea data"` — batch ingest; per-file try/except; duplicates ok. Currently ~5 s per 90 MB file.
+- `python scripts/render_previews.py [--force | --render-ver-below N]` — regenerate heatmap PNGs without touching mea_file. ~0.4 s per row.
+- `python scripts/apply_schema.py --database DB [--drop-first | --drop-database] [--yes]` — safe recreate. Confirms unless --yes. Handles DELIMITER blocks.
+- `pytest` — 190-test suite. Markers: `db` (live DB), `testdb` (destructive tests, needs `gc-ims_database_test`), `slow` (SHA-256 scan). Integrity-scan file `tests/test_integrity_scan.py` runs nightly / post-batch.
+
+## Column CHECK constraints (fail-fast at INSERT/UPDATE)
+Enforced by MySQL 8, not by app code. New rows violating any of these are refused by the DB:
+- `ck_meas_geometry`: `file_size_bytes = header_bytes + n_spectra * n_drift_points * 2` (byte-exact reshape identity).
+- `ck_meas_retired_consistency`: `retired=0` has all retire-metadata NULL; `retired=1` needs `retired_at` AND `retired_by`.
+- `ck_meas_rip_index_within_axis`: `rip_drift_index IS NULL OR < n_drift_points`.
+- `ck_meas_matrix_dtype`: whitelist (`'int16le'` only). Future dtypes must widen the CHECK — deliberate friction.
+CHECK violations raise `pymysql.err.OperationalError` (3819), not IntegrityError.
 
 ## MySQL settings assumed
 max_allowed_packet >= 256M; innodb_file_per_table = ON.

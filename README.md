@@ -8,14 +8,44 @@ quick-viewing G.A.S. FlavourSpec GC-IMS `.mea` measurement files.
 - `docs/DESIGN.md` — authoritative design-decision record (English)
 - `docs/DESIGN_zh-TW.md` — Chinese reading snapshot (authoritative version is DESIGN.md)
 - `docs/schema-diagram.png` — ERD overview
-- `schema/gcims_schema.sql` — full MySQL 8 DDL (12 tables, triggers, procedure, grants)
-- `sample/README.md` — sample .mea inventory (files stored on NAS, identified by SHA-256)
+- `schema/gcims_schema.sql` — full MySQL 8 DDL (14 tables + procedure + triggers + 4 CHECK constraints)
+- `sample/README.md` — sample .mea inventory (8 file types, pinned by SHA-256)
+- `scripts/`
+  - `mea_parser.py` — pure-function parser (split_mea, promote, find_rip, telemetry)
+  - `mea_preview.py` — max-pool + npz + pixel-dump heatmap
+  - `ingest_mea.py` — batch ingest CLI (`.mea` → measurement + preview_npz + mea_file)
+  - `render_previews.py` — deferred heatmap/thumb PNG generator (matplotlib figure-style; RIP-normalized X)
+  - `apply_schema.py` — safe DROP/RECREATE utility (default / --drop-first / --drop-database)
+- `tests/` — pytest suite (190 tests: parser + preview unit; DB triggers/procedure/CHECKs; live-DB integrity scan)
 
 ## Status
-Design phase complete; schema cross-validated against four real .mea files
-spanning three firmware generations (2.16 / 2.52 / 4.82, 2014–2025).
-Implementation (ingest pipeline + admin app + search app) is next.
+**Version 1.0.0** — first tagged release.
+- Design phase: complete. 20+ recorded decisions in `docs/DESIGN.md`.
+- Schema: 14 tables + `move_category` procedure + 2 anti-cycle triggers + 4 CHECK constraints.
+- Cross-validation: 8 real `.mea` file TYPES across 5 firmware generations (2.16/2.29/2.52/4.73/4.82) and 2 product lines (FlavourSpec dual-EPC + GC-IMS pump-controlled).
+- Ingest pipeline: implemented. 49 files loaded; SHA-256 roundtrip verified on all.
+- Preview generation: two-stage per §5 step 8 — fast ingest stores `preview_npz` only, `render_previews.py` fills PNGs (readGAS-style figure by default).
+- QC: 190 tests, 27 of them integrity scans against the live DB (SHA + npz + PNG + registry + audit-trail coverage).
+- Next: admin app (batch edit + category management) and search app.
 
 ## Quick start for Claude Code
 Open this folder; CLAUDE.md loads automatically. Then:
 read docs/DESIGN.md and schema/gcims_schema.sql before writing any code.
+
+## Common commands
+```
+# ingest new .mea files
+python scripts/ingest_mea.py "mea data"
+
+# fill/refresh heatmap PNGs (deferred render, reads only preview_npz)
+python scripts/render_previews.py                # missing only
+python scripts/render_previews.py --force        # rebuild every row
+
+# reset a database (nuclear — needs shengic DBA account)
+python scripts/apply_schema.py --database gc-ims_database_test --drop-database --yes
+
+# QA
+pytest                        # everything
+pytest -m "not slow"          # skip the SHA-256 scan (~10 s)
+pytest -m "not db and not testdb"   # pure functions only
+```

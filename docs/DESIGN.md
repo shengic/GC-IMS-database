@@ -162,23 +162,137 @@ Query discipline: blob columns only via PK single-row lookup.
    optional nightly recount via JSON_CONTAINS_PATH if exact counts
    are wanted
 5. Explode the 5 series keys -> run_telemetry
-6. np.frombuffer int16 -> matrix; locate RIP (argmax |column mean|);
-   store rip_drift_index / rip_drift_ms
+6. np.frombuffer int16 -> matrix; locate RIP by WINDOWED argmax
+   |column mean| (see §5b for window rationale — unconstrained argmax
+   is unsafe); store rip_drift_index / rip_drift_ms. If the winner's
+   magnitude is less than 3x the median-window magnitude, mark
+   ingest_log result 'ok_with_warnings' with message "weak/atypical
+   RIP at idx=N" (file still imported, downstream dt_rip_rel flagged
+   suspect).
 7. (REMOVED from scope — see §18.) Ingest never writes peak/compound;
    those tables are dormant reservations for a possible future
    analysis layer.
-8. abs(matrix) -> max-pool ONCE, then three derivatives from the same
-   in-memory array: (a) savez_compressed -> preview_npz;
-   (b) fixed-recipe render -> heatmap_png (native resolution);
-   (c) LANCZOS downscale of (b) -> thumb_png. All written with
-   png_render_ver in the SAME transaction as everything else — no
-   half-derived rows possible. Polarity (step 6) precedes rendering.
-   Backfill pattern (recorded): when a new derived column is added to
-   an already-populated library, never re-import — a small script
-   SELECTs rows WHERE new_col IS NULL and derives from existing
-   preview_npz (or mea_file), touching nothing else. This is the §10
-   regenerable-fields principle in operational form.
+8. abs(matrix) -> max-pool ONCE -> savez_compressed(matrix, rt_axis_s,
+   dt_axis_ms) -> preview_npz. Pipeline_ver stamped in the same
+   transaction as everything else. heatmap_png / thumb_png / png_
+   render_ver are left NULL — they are rendered by a SEPARATE step
+   (scripts/render_previews.py, §5d) that reads only preview_npz +
+   rip_drift_index. Two reasons for the split:
+   (a) recipe iteration: changing colormap/clip/log or later adding
+       RI-warp calibration must not require re-decompressing mea_file
+       (~40% ingest speedup);
+   (b) time-of-render decoupling: the RI axis needs per-batch
+       standards that may not exist at ingest; deferred render can
+       apply calibration when it becomes available (§18 write-back
+       friendly).
+   This is the §10 regenerable-fields principle in operational form;
+   §5 step-8 backfill applies to any future derived column added to
+   an already-populated library — SELECT WHERE new_col IS NULL,
+   derive from preview_npz (or mea_file if raw needed), touch nothing
+   else.
 9. zstd(raw) -> mea_file; write ingest_log
+
+## 5b. RIP detection: VOCal-compatible, cross-tool aligned (RECORDED)
+
+Aligned with the external analysis tool GC-IMS-PEAK (`rip.py find_rip`)
+which itself matches VOCal `CleanMEA.getRIP()`. Cross-tool alignment
+matters because §18's future write-back path assumes GC-IMS-PEAK's
+`drift_relative = dt_index / rip_index` values are compared against
+the DB's stored `rip_drift_index` — divergent RIP detection would
+misalign every peak.
+
+Algorithm: argmax over the RT=0 row (`matrix[0, :]`) after skipping the
+first 200 drift samples (VOCal's fixed cutoff; independent of drift-
+axis length — 200 samples at 150 kHz = 1.33 ms, safely before any
+plausible RIP arrival time).
+
+Additions on top of the reference method for the archive use case:
+- Signed value from row0 -> `polarity` (reference tool assumes
+  positive; DB stores actual polarity per §2b PER-FILE finding).
+- Weak-RIP flag: winner magnitude vs. median of the same tail;
+  if `< 3.0x median`, ingest_log result becomes 'ok_with_warnings'
+  per §19 — file still imported, admin reviews.
+
+```python
+def find_rip(matrix, start=200):
+    row0 = matrix[0, :]
+    tail = row0[start:]
+    idx_local = int(np.argmax(np.abs(tail)))
+    rip_index = start + idx_local
+    signed = float(row0[rip_index])
+    polarity = 'negative' if signed < 0 else 'positive'
+    med = float(np.median(np.abs(tail)))
+    weak = abs(signed) < 3.0 * med
+    return rip_index, signed, polarity, weak
+```
+
+Historical note (kept for context): an earlier §5b draft used windowed
+argmax over `column mean` (drift fraction 0.15-0.40). That approach
+was chosen after the pathological file `251020_130723_2WK_4_2.mea`
+returned argmax at drift index 18 from a leading-transient spike.
+The VOCal-compatible method above ALSO rejects that case (`start=200 >
+18`) while additionally matching the external analysis tool — so it
+supersedes the fraction-window design.
+
+## 5d. Deferred preview render (RECORDED)
+
+`scripts/render_previews.py` — separate CLI, runs after ingest (either
+automatically post-batch or manually when recipe changes). Reads only
+`mea_preview.preview_npz` + `measurement.rip_drift_index` from the DB;
+NEVER touches mea_file, header_json, run_telemetry, or the §10 human
+fields (description/note/category_id). Writes back only heatmap_png,
+thumb_png, png_render_ver on `mea_preview`.
+
+Selection modes (all support batch-safe per-row try/except like
+ingest §14 rule 3):
+- default (no flag): WHERE heatmap_png IS NULL — fill missing.
+- `--render-ver-below N`: WHERE png_render_ver < N — recipe upgrade.
+- `--mea-id N`: single-row rebuild.
+- `--force`: rebuild every row.
+
+Style flag: `--style figure` (default, matplotlib figure w/ axes,
+colorbar, RIP-normalized X, RT-s Y — matches GC-IMS-PEAK's readGAS.
+plot_heatmap) or `--style raw` (native pooled pixel dump per §17,
+axes drawn at display time). Style is a per-run choice, not a
+per-row attribute; changing style → bump RENDER_VER, re-run with
+`--force` or `--render-ver-below`.
+
+Future RI-axis support: when n-alkane calibration data is available
+for a batch, `--ri-calibration standards.json` warps rows to RI (per
+reference tool's `warp_rows_to_ri`). The npz's rt_axis_s stays the
+source of truth; the RI transformation is display-side only.
+
+## 5c. Heatmap PNG recipe (RECORDED, aligned to GC-IMS-PEAK)
+
+`mea_preview.heatmap_png` is pre-rendered at ingest with the recipe
+below — a compressed version of `GC-IMS-PEAK/readGAS.plot_heatmap`
+minus the matplotlib figure furniture (no axes/colorbar/title baked
+in), so the blob stays a pure pixel dump at native preview resolution
+(§17 rule). Tk viewer overlays labels + RIP marker at display time
+using the npz axes.
+
+```
+img = pooled.astype(float32)
+img = log1p(img - img.min())            # RIP suppression (log_scale ON)
+sub = img[::step_r, ::step_c]           # subsample (max 1000x1000) for perf
+vmin, vmax = percentile(sub, (1.0, 99.5))
+normed = clip((img - vmin) / (vmax - vmin), 0, 1)
+rgb = VIRIDIS_LUT[(normed * 255).uint8]
+rgb = flipud(rgb)                       # origin='lower': RT=0 at bottom
+PNG.save(rgb)
+```
+
+Fixed parameters (change bumps `png_render_ver`; §5 step 8 selective
+re-render pattern applies): colormap = viridis, clip = (1.0, 99.5)
+percent, log_scale ON. Deviations from the reference:
+- log_scale is ON here (reference default is OFF; reference's `--log`
+  flag matches our storage recipe). Reason: DB preview must show peaks
+  clearly on average, and RIP typically saturates when un-logged.
+- No axes/colorbar/title (reference produces a full matplotlib figure
+  ~1200x1350 px; DB stores 1:1 pooled matrix ~1200x525 px, ~200-400 KB).
+- RIP-normalized x-axis is a DISPLAY-time overlay (Tk/web), computed
+  from `measurement.rip_drift_index` + the npz `dt_axis_ms` — not baked
+  into the pixel matrix.
 
 ## 6. Tk app architecture
 Direct MySQL connection (pooled), no web API layer — desktop app is Python.
@@ -530,6 +644,116 @@ with actor+old/new). Motivation: legacy files (e.g. fw2.16 era) carry
 sparse headers; batch-of-30 identical context should not cost 30 manual
 entries. This is a manual bulk-edit tool, NOT ingest auto-fill — content
 always originates from a human.
+
+## 2e. File TYPE 5 cross-check: fw 2.29, 2015, `.s.mea` extension (RECORDED)
+
+File type 5: `151030_162302_Blind_Luft_0µgL-1.s.mea` — machine
+FlavourSpec (serial 1H1-00081), firmware 2.29 ("29 Sep 2015"), 56
+header keys, matrix 4285x4500, `15_MIN` demo-ketones program, polarity
+positive.
+
+Findings (validated on all four `.s.mea` demo files):
+1. `.s.mea` filename extension exists (era 2015). Ingest must accept
+   this variant — filename extension is not a schema field, only a
+   pattern our .mea globbing must include (`*.mea` OR `*.s.mea`).
+   Filename encoding: contains `µ` (0xB5 latin-1) — read with binary
+   I/O and store as-is; do NOT roundtrip through cp950 shell.
+2. Header key set = 56, a MIDDLE size between fw 2.16 (51) and fw 2.52
+   (60). Machine-type string decodes as `FlavourSpecR` (plain ASCII
+   `R` in place of `®` — this era wrote the trademark char as `R`,
+   not 0xAE). Ingest must NOT normalize/reject — record verbatim; the
+   `instrument.machine_type` VARCHAR absorbs it. Design docs say
+   "FlavourSpec" without decoration to cover both.
+3. Telemetry present: `Flow Epc 1/2` only (like fw 2.16). No Pressure
+   arrays. Same as fw 2.16 — the ingest series-loop is already
+   subset-tolerant per §2c rule 2.
+4. `sample_data` field pattern unchanged; RIP detection worked
+   (idx ~1192, positive column mean).
+
+split_mea() reference implementation passed UNCHANGED (byte-exact,
+`delta=0`). No schema DDL changes needed.
+
+## 2f. File TYPE 6 cross-check: fw 4.73 GC-IMS pump-series (RECORDED)
+
+File type 6: `250604_165140.mea` — machine type **`GC-IMS`** (not
+FlavourSpec), serial 5F1-00554, firmware 4.73 ("2025-05-30"), **70
+header keys**, matrix 12246x3150 (or 16329x3150 on the BREATH-TEST
+program), polarity positive. This is a SEPARATE PRODUCT LINE, not a
+firmware variant.
+
+### New telemetry series: `pump1_flow`, `pump1_pressure` (RECORDED)
+5F1-00554 controls the GC flow with a **pump** instead of the second
+EPC controller. The header carries two additional space-delimited
+array keys unique to this product:
+- `Pump 1 flow`      (analogous to flow_gc on FlavourSpec)
+- `Pump 1 pressure`  (analogous to press_gc on FlavourSpec)
+Plus scalars `Pump 1 flow setpoint`, `Start flow pump 1`, `Start
+pressure pump 1`.
+
+Schema change (non-breaking, DESIGN.md §13 ENUM tail-append rule):
+`run_telemetry.series` ENUM extended:
+```
+ENUM('flow_ims','flow_gc','press_ims','press_gc','press_ambient',
+     'pump1_flow','pump1_pressure')
+```
+Ingest maps `Pump 1 flow` -> `pump1_flow`, `Pump 1 pressure` ->
+`pump1_pressure` via HEADER_KEY_ALIASES. FlavourSpec files never
+emit these series → row set stays subset-tolerant (§2c rule 2).
+
+### fw 4.73 key renames (RECORDED)
+Consolidated header-key alias map with all 6 firmware generations now
+covered:
+
+| canonical target | fw 2.16 | fw 2.29 | fw 2.52 | fw 4.73 (GC-IMS) | fw 4.82 |
+|---|---|---|---|---|---|
+| firmware_date          | (absent)         | `Firmware date`      | `Firmware date`  | `Firmware date`         | `Firmware date`         |
+| sample_rate_khz        | `Chunk sample rate` | `Chunk sample rate` | `Chunk sample rate` | `Chunk sample rate` | `Chunk sample rate`  |
+| trig_repetition_ms     | `Chunk trigger repetition` | `Chunk trigger repetition` | `Chunk trigger repetition` | `Chunk trigger repetition` | `Chunk trigger repetition` |
+| flow_ims_setpoint      | (absent)         | `Start flow1`        | `Start flow1`    | `Start flow IMS`        | `Start flow IMS`        |
+| flow_gc_setpoint       | (absent)         | `Start flow2`        | `Start flow2`    | `Start flow GC`         | `Start flow GC`         |
+| flow_pump1_setpoint    | —                | —                    | —                | `Pump 1 flow setpoint`  | —                       |
+| ambient_pressure_kpa   | mean of `Pressure Ambient` array (fw≥2.5x); absent on 2.16/2.29 | | | | |
+| drift_gas              | (absent)         | (absent)             | `Drift Gas`      | parse from `EPC gas settings` "IMS: X" | `Drift Gas` |
+| drift_voltage_v        | (absent)         | (absent)             | `nom Drift Potential Difference` | `Sensor drift voltage` | `Sensor drift voltage` |
+| flow_ims series (telemetry) | `Flow Epc 1` | `Flow Epc 1`         | `Flow Epc 1`     | `Flow EPC IMS`          | `Flow EPC IMS`          |
+| flow_gc series (telemetry)  | `Flow Epc 2` | `Flow Epc 2`         | `Flow Epc 2`     | `Flow EPC GC`           | `Flow EPC GC`           |
+| press_ims series (telemetry)| (absent)     | (absent)             | `Pressure Epc 1` | `Pressure EPC IMS`      | `Pressure EPC IMS`      |
+| press_gc series (telemetry) | (absent)     | (absent)             | `Pressure Epc 2` | `Pressure EPC GC`       | `Pressure EPC GC`       |
+| press_ambient (telemetry)   | (absent)     | (absent)             | `Pressure Ambient` | `Pressure Ambient`    | `Pressure Ambient`      |
+| pump1_flow (telemetry)      | —            | —                    | —                | `Pump 1 flow`           | —                       |
+| pump1_pressure (telemetry)  | —            | —                    | —                | `Pump 1 pressure`       | —                       |
+
+Corrections to earlier records this replaces:
+- Original design assumed `Firmware Date` (Title Case) — every real
+  file uses `Firmware date` (lowercase d). Corrected above.
+- Original design assumed `Sample rate` / `Trig. repetition time` —
+  every real file uses `Chunk sample rate` / `Chunk trigger
+  repetition`. Corrected above.
+- Original design assumed `EPC ambient pressure` (fw 2.x) /
+  `Start ambient pressure` (fw 4.x) as ambient snapshot scalars. In
+  practice, neither key exists in any file examined; the ambient
+  pressure telemetry array (`Pressure Ambient`) is the only ambient
+  data. Ingest derives the scalar as `mean(press_ambient)` when the
+  array is present; NULL when absent (fw 2.16/2.29).
+
+### Novel keys that stay JSON-only (fw 4.73)
+`EPC gas settings`, `End pressure EPC GC/IMS`, `Start pressure EPC
+GC/IMS`, `Snapshot`, `Snapshot Current Values`, `Timezone`,
+`Device Maintenance`, `Sensor drift voltage` (also present fw 4.82 —
+promotable via alias above), `Sensor ID`. Registry logs them; §12
+decides promotion later if daily-searched.
+
+split_mea() reference implementation passed UNCHANGED on all
+5F1-00554 files (byte-exact, `delta=0`). Reshape (12246, 3150) and
+(16329, 3150) verified.
+
+## 2g. File TYPE 8 addendum: fw 2.52 long-run (RECORDED)
+
+File `240328_122104_KETONE_MIX_60T.mea` — same fw as type 2/3, same
+key set (60), but 16857x4500 (~59 min GC ramp, TEA2 method,
+different instrument 1H1-00123). Verifies: schema geometry columns
+(`n_spectra INT UNSIGNED`) tolerate 2x-larger runs; `run_time_s
+DECIMAL(8,1)` fits (16857 * 0.030 * 6 = 3034 s). No schema change.
 
 ## 2d. File TYPE 4: polarity has NO header indicator (RECORDED)
 

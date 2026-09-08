@@ -6,4 +6,10 @@ __pycache__/
 venv/
 *.mea
 !sample/README.md
+mea data/
+
 .DS_Store
+.claude/
+.pytest_cache/
+_ref/
+_smoke/

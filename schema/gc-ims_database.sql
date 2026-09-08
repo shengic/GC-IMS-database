@@ -1,19 +1,16 @@
 -- ============================================================
 -- GC-IMS .mea measurement database (MySQL 8.0+)
 -- Version: 1.0.0
--- Designed from actual G.A.S. FlavourSpec .mea structure:
---   text header (latin-1 key=value, ~60 keys) + int16 LE matrix
---   e.g. 8571 spectra x 4500 drift points, 150 kHz, 30 ms sweep
--- Storage strategy:
---   * whole original .mea  -> mea_file      (zstd, single source of truth)
---   * searchable metadata  -> measurement   (typed columns + JSON)
---   * peak table           -> peak          (search core)
---   * downsampled preview  -> mea_preview   (npz blob, on-the-fly render)
+-- Deployment variant: targets database `gc-ims_database` (with hyphen).
+-- Identical to gcims_schema.sql (the canonical source) except for the
+-- database name. Use this file to bootstrap the production DB directly;
+-- use gcims_schema.sql via `scripts/apply_schema.py --database DB` to
+-- deploy under any other name.
 -- ============================================================
 
-CREATE DATABASE IF NOT EXISTS gcims
+CREATE DATABASE IF NOT EXISTS `gc-ims_database`
   DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;
-USE gcims;
+USE `gc-ims_database`;
 
 -- ------------------------------------------------------------
 -- 1. Instrument registry (from header: Machine type/serial, ADIO, firmware)
