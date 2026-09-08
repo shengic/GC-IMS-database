@@ -1,4 +1,4 @@
-"""Pure, DB-free .mea parsing. Version 1.0.0.
+"""Pure, DB-free .mea parsing. Version 1.0.
 
 Reference implementation of DESIGN §2b (split_mea), §2c/§2f (aliases,
 absence-tolerance), §5b (windowed RIP detection), §19 (leniency vs

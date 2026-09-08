@@ -1,4 +1,4 @@
-"""Apply schema/gcims_schema.sql to a target MySQL database. Version 1.0.0.
+"""Apply schema/gcims_schema.sql to a target MySQL database. Version 1.0.
 
 Handles:
 - DELIMITER blocks (a `mysql` CLI directive that pymysql cannot parse).

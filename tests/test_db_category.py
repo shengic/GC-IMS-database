@@ -1,4 +1,4 @@
-"""sample_category anti-cycle protections per DESIGN §3c.
+"""sample_category anti-cycle protections per DESIGN §3c. Version 1.0.
 
 Three layers:
   (a) triggers block SELF-parenting only (MySQL 1442 prevents SELECT-on-same-

@@ -1,3 +1,4 @@
+<!-- Version 1.0 -->
 # GC-IMS Database — Design Rationale
 
 Companion to `schema/gcims_schema.sql`. Records the reasoning behind each

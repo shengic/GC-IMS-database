@@ -1,4 +1,4 @@
-"""Full-scan integrity audit against the LIVE `gc-ims_database`.
+"""Full-scan integrity audit against the LIVE `gc-ims_database`. Version 1.0.
 
 Every test is read-only and asserts an invariant that must hold for
 correctly-ingested data. Run periodically (post-batch, nightly, after

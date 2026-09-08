@@ -1,6 +1,6 @@
 -- ============================================================
 -- GC-IMS .mea measurement database (MySQL 8.0+)
--- Version: 1.0.0
+-- Version 1.0
 -- Deployment variant: targets database `gc-ims_database` (with hyphen).
 -- Identical to gcims_schema.sql (the canonical source) except for the
 -- database name. Use this file to bootstrap the production DB directly;

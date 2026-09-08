@@ -1,4 +1,4 @@
-"""Duplicate-import protection per DESIGN §14.
+"""Duplicate-import protection per DESIGN §14. Version 1.0.
 
 file_hash UNIQUE constraint (`uk_hash`) is the race-proof backstop — a
 concurrent INSERT that beats the app's check-then-insert cannot

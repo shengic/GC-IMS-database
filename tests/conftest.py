@@ -1,4 +1,4 @@
-"""Shared fixtures for the QC test suite.
+"""Shared fixtures for the QC test suite. Version 1.0.
 
 - SAMPLE_FILES maps firmware -> Path (one representative file per firmware
   generation, chosen from `mea data/`). Tests that need a specific file

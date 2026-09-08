@@ -1,6 +1,6 @@
 -- ============================================================
 -- GC-IMS .mea measurement database (MySQL 8.0+)
--- Version: 1.0.0
+-- Version 1.0
 -- Designed from actual G.A.S. FlavourSpec .mea structure:
 --   text header (latin-1 key=value, ~60 keys) + int16 LE matrix
 --   e.g. 8571 spectra x 4500 drift points, 150 kHz, 30 ms sweep

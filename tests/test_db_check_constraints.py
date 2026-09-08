@@ -1,4 +1,4 @@
-"""CHECK constraints on `measurement` reject bad data at INSERT time.
+"""CHECK constraints on `measurement` reject bad data at INSERT time. Version 1.0.
 
 Companion to test_integrity_scan.py: those tests find bad data that
 somehow made it in; these tests verify the DB WON'T LET IT IN.

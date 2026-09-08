@@ -1,4 +1,4 @@
-"""Preview generation per DESIGN §5 step 8 / §17. Version 1.0.0.
+"""Preview generation per DESIGN §5 step 8 / §17. Version 1.0.
 
 Ingest calls max_pool + pack_npz (interactive layer only, per DESIGN §5d
 two-stage split). render_previews.py fills heatmap_png / thumb_png later,

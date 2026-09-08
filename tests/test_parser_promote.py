@@ -1,4 +1,4 @@
-"""`promote()` covers all 6 firmware generations without raising.
+"""`promote()` covers all 6 firmware generations without raising. Version 1.0.
 
 Pins the DESIGN §2f HEADER_KEY_ALIASES table: every promoted column must
 be filled OR left None (never raise) for each firmware generation. Also

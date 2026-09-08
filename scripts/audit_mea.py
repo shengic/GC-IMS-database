@@ -1,6 +1,6 @@
 """Dry-run audit of .mea files against the design-doc split_mea() logic.
-No DB writes. Reports geometry, header key set, polarity, and any surprises
-that could stress the current schema."""
+Version 1.0. No DB writes. Reports geometry, header key set, polarity,
+and any surprises that could stress the current schema."""
 from __future__ import annotations
 import re, sys, io
 from pathlib import Path

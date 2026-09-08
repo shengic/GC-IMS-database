@@ -1,4 +1,4 @@
-"""Batch-ingest .mea files under a folder into the DB. Version 1.0.0.
+"""Batch-ingest .mea files under a folder into the DB. Version 1.0.
 
 Follows DESIGN.md §5 (pipeline steps), §10 (never touch human fields),
 §14 (per-file try/except: batch never aborts), §19 (fail-loud parse

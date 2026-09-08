@@ -1,3 +1,4 @@
+<!-- Version 1.0 -->
 # GC-IMS Measurement Database
 
 MySQL database + Tkinter desktop app for storing, searching, and quick-viewing

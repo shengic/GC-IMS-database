@@ -1,3 +1,4 @@
+<!-- Version 1.0 -->
 # GC-IMS Measurement Database
 
 MySQL database + Tkinter desktop apps for storing, searching, and
@@ -19,7 +20,7 @@ quick-viewing G.A.S. FlavourSpec GC-IMS `.mea` measurement files.
 - `tests/` — pytest suite (190 tests: parser + preview unit; DB triggers/procedure/CHECKs; live-DB integrity scan)
 
 ## Status
-**Version 1.0.0** — first tagged release.
+**Version 1.0** — first tagged release.
 - Design phase: complete. 20+ recorded decisions in `docs/DESIGN.md`.
 - Schema: 14 tables + `move_category` procedure + 2 anti-cycle triggers + 4 CHECK constraints.
 - Cross-validation: 8 real `.mea` file TYPES across 5 firmware generations (2.16/2.29/2.52/4.73/4.82) and 2 product lines (FlavourSpec dual-EPC + GC-IMS pump-controlled).
