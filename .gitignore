@@ -1,0 +1,9 @@
+config.ini
+*.env
+__pycache__/
+*.pyc
+.venv/
+venv/
+*.mea
+!sample/README.md
+.DS_Store
