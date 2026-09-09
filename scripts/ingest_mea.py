@@ -1,4 +1,4 @@
-"""Batch-ingest .mea files under a folder into the DB. Version 1.0.
+"""Batch-ingest .mea files under a folder into the DB. Version 1.1.
 
 Follows DESIGN.md §5 (pipeline steps), §10 (never touch human fields),
 §14 (per-file try/except: batch never aborts), §19 (fail-loud parse
@@ -71,6 +71,33 @@ def _upsert_method(cur, p, warnings):
           json.dumps(p["temp_setpoints_c"]) if p["temp_setpoints_c"] else None,
           ph))
     return cur.lastrowid
+
+
+def _upsert_batch_and_link(cur, folder_name: str, mea_id: int, sample_type: str):
+    """§21 auto-batch: at ingest, group by folder_name.
+    - Create the batch if missing (label = folder_name).
+    - Link this measurement (measurement.batch_id).
+    - If this measurement is a 'blank' or 'standard' and the batch has no
+      pointer set for that role yet, set it. Existing pointers stay put
+      (admin can re-designate manually).
+    """
+    cur.execute("SELECT batch_id, std_mea_id, blank_mea_id FROM batch WHERE label = %s",
+                (folder_name,))
+    row = cur.fetchone()
+    if row is None:
+        cur.execute("INSERT INTO batch (label) VALUES (%s)", (folder_name,))
+        batch_id = cur.lastrowid
+        cur_std = cur_blank = None
+    else:
+        batch_id, cur_std, cur_blank = row
+    cur.execute("UPDATE measurement SET batch_id = %s WHERE mea_id = %s",
+                (batch_id, mea_id))
+    if sample_type == "standard" and cur_std is None:
+        cur.execute("UPDATE batch SET std_mea_id = %s WHERE batch_id = %s",
+                    (mea_id, batch_id))
+    elif sample_type == "blank" and cur_blank is None:
+        cur.execute("UPDATE batch SET blank_mea_id = %s WHERE batch_id = %s",
+                    (mea_id, batch_id))
 
 
 def _register_keys(cur, header, mea_id):
@@ -168,6 +195,8 @@ def ingest_one(conn, path: Path):
             mea_id = cur.lastrowid
 
             _register_keys(cur, header, mea_id)
+
+            _upsert_batch_and_link(cur, path.parent.name, mea_id, stype)
 
             if tel_series:
                 rows = []

@@ -1,4 +1,4 @@
-"""header_key_registry upsert semantics per DESIGN §5 step 4. Version 1.0.
+"""header_key_registry upsert semantics per DESIGN §5 step 4. Version 1.1.
 
 Every ingested key runs INSERT ... ON DUPLICATE KEY UPDATE
 occurrences = occurrences + 1. The registry is thus an incrementally

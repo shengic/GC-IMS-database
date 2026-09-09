@@ -1,4 +1,4 @@
-"""`split_mea` correctness across all firmware generations. Version 1.0.
+"""`split_mea` correctness across all firmware generations. Version 1.1.
 
 Pins the byte-exact invariant from DESIGN §2b: arithmetic back-calc split
 must match heuristic first-non-printable-byte within a few bytes; header

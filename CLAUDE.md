@@ -1,11 +1,11 @@
-<!-- Version 1.0 -->
+<!-- Version 1.1 -->
 # GC-IMS Measurement Database
 
 MySQL database + Tkinter desktop app for storing, searching, and quick-viewing
 G.A.S. FlavourSpec GC-IMS `.mea` files.
 
 ## Read first
-- `schema/gcims_schema.sql` — authoritative DDL (14 tables + procedure + 2 triggers + 4 CHECK constraints). Do not restructure without reading `docs/DESIGN.md`.
+- `schema/gcims_schema.sql` — authoritative DDL (15 tables + procedure + 2 triggers + 4 CHECK constraints). Do not restructure without reading `docs/DESIGN.md`.
 - `docs/DESIGN.md` — why the schema is designed this way. Every non-obvious decision is recorded there.
 - `scripts/mea_parser.py` — reference implementation of `split_mea` / `find_rip` / `promote` / `parse_telemetry`. Match this when writing any other .mea reader.
 - `tests/README.md` — QC plan, marker conventions (`db`, `testdb`, `slow`), and how to spin up `gc-ims_database_test`.
@@ -100,10 +100,18 @@ G.A.S. FlavourSpec GC-IMS `.mea` files.
   profiles disable all write features in the UI.
 
 ## Ingest + QA workflow
-- `python scripts/ingest_mea.py "mea data"` — batch ingest; per-file try/except; duplicates ok. Currently ~5 s per 90 MB file.
+- `python scripts/ingest_mea.py "mea data"` — batch ingest; per-file try/except; duplicates ok. Now auto-creates `batch` rows keyed on folder_name and links measurements + STD/BLANK pointers.
+- `python scripts/backfill_batches.py` — one-shot: re-classify sample_type and rebuild batches for existing rows (safe / idempotent).
 - `python scripts/render_previews.py [--force | --render-ver-below N]` — regenerate heatmap PNGs without touching mea_file. ~0.4 s per row.
 - `python scripts/apply_schema.py --database DB [--drop-first | --drop-database] [--yes]` — safe recreate. Confirms unless --yes. Handles DELIMITER blocks.
-- `pytest` — 190-test suite. Markers: `db` (live DB), `testdb` (destructive tests, needs `gc-ims_database_test`), `slow` (SHA-256 scan). Integrity-scan file `tests/test_integrity_scan.py` runs nightly / post-batch.
+- `pytest` — 205-test suite. Markers: `db` (live DB), `testdb` (destructive tests, needs `gc-ims_database_test`), `slow` (SHA-256 scan). Integrity-scan file `tests/test_integrity_scan.py` runs nightly / post-batch.
+
+## Batch model (v1.1, DESIGN §21)
+- `batch` table: `batch_id`, `label` (UNIQUE — typically the folder_name), nullable `std_mea_id` / `blank_mea_id` → measurement.
+- `measurement.batch_id` FK → batch, nullable. ON DELETE SET NULL on both sides.
+- STD.mea and BLANK.mea are STORED IDENTICALLY to samples — same `measurement` / `mea_file` / `mea_preview` rows, distinguished only by `sample_type`. Batch table holds POINTERS, never a second copy of the bytes.
+- Auto-detection at ingest: first `sample_type='standard'` in folder → std_mea_id; first `sample_type='blank'` → blank_mea_id. Existing pointers not overwritten (admin can re-designate).
+- Absence tolerated: legacy folders lacking one/both calibrations still get a batch; features needing STD (RI axis) degrade gracefully.
 
 ## Column CHECK constraints (fail-fast at INSERT/UPDATE)
 Enforced by MySQL 8, not by app code. New rows violating any of these are refused by the DB:

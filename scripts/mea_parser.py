@@ -1,4 +1,4 @@
-"""Pure, DB-free .mea parsing. Version 1.0.
+"""Pure, DB-free .mea parsing. Version 1.1.
 
 Reference implementation of DESIGN §2b (split_mea), §2c/§2f (aliases,
 absence-tolerance), §5b (windowed RIP detection), §19 (leniency vs
@@ -184,13 +184,17 @@ def promote(header: dict) -> dict:
 
 
 def sample_type_from_name(name):
-    """§3 measurement.sample_type classification. Conservative pattern match."""
+    """§3 measurement.sample_type classification. Conservative pattern match.
+    Recognises: blank/blind -> blank; calib/calibration/testmix/ketone mix
+    /standard/std -> standard; qc/quality -> qc; else -> sample."""
     if not name:
         return "unknown"
     n = name.lower()
     if "blank" in n or "blind" in n:
         return "blank"
-    if "calib" in n or "calibration" in n:
+    if ("calib" in n or "calibration" in n
+            or "testmix" in n
+            or re.search(r"ketone[ _-]?mix", n)):
         return "standard"
     if re.search(r"\bstd\b|\bstandard\b", n):
         return "standard"

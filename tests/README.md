@@ -1,4 +1,4 @@
-<!-- Version 1.0 -->
+<!-- Version 1.1 -->
 # Tests
 
 QC for the ingest pipeline, schema, and rendering. Two tiers:
@@ -42,6 +42,7 @@ pytest tests/test_parser_split.py -v
 | `test_db_dedup.py`        | Duplicate `file_hash` INSERT → IntegrityError on `uk_hash` | DESIGN §14 |
 | `test_db_registry.py`     | `INSERT ... ON DUPLICATE KEY UPDATE occurrences = occurrences + 1` semantics | DESIGN §5 step 4 |
 | `test_db_soft_delete.py`  | `retired=1` filters out of default list; `retired=0` toggle brings back | DESIGN §15 |
+| `test_db_batch.py`        | v1.1: batch.label UNIQUE; std_mea_id/blank_mea_id nullable FKs to measurement; measurement.batch_id nullable FK; ON DELETE SET NULL both directions | DESIGN §21 |
 | `test_db_grants.py`       | `gcims_viewer` can `SELECT`, cannot `INSERT` on `measurement` (post-grants only) | DESIGN §8 |
 
 ### Integration — end-to-end

@@ -1,5 +1,5 @@
 """Dry-run audit of .mea files against the design-doc split_mea() logic.
-Version 1.0. No DB writes. Reports geometry, header key set, polarity,
+Version 1.1. No DB writes. Reports geometry, header key set, polarity,
 and any surprises that could stress the current schema."""
 from __future__ import annotations
 import re, sys, io

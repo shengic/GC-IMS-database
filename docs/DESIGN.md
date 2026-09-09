@@ -1,4 +1,4 @@
-<!-- Version 1.0 -->
+<!-- Version 1.1 -->
 # GC-IMS Database — Design Rationale
 
 Companion to `schema/gcims_schema.sql`. Records the reasoning behind each
@@ -1122,3 +1122,82 @@ with search-engine intuition.
 Governance reminder (unchanged): category tagging quality at import time
 determines source-A recall; the unified box makes poor tagging
 survivable via B/C, not painless.
+
+
+## 21. Batch: linking samples to their calibration files (RECORDED, v1.1)
+
+Field visit finding (2026-09-09): the field workflow puts a BLANK.mea
+and an STD.mea (Ketone Mix 6, C4-C9) in EACH FOLDER of samples. STD
+provides the anchors for GC RT -> Retention Index (RI) normalization
+(source: FlavourSpec technical PDF p.91 — "需測試 Ketone mix6 (C4-C9)
+標準液作 GC RI 歸一化"). BLANK is used for baseline subtraction / QC.
+The v1.0 schema treated these as isolated measurements; v1.1 adds the
+relationship.
+
+### The `batch` table
+```
+batch(batch_id PK, label UNIQUE, std_mea_id FK, blank_mea_id FK,
+      created_at, notes)
+measurement + column: batch_id FK -> batch
+```
+- `label` = folder_name at ingest (uniqueness enforced).
+- `std_mea_id` / `blank_mea_id`: nullable pointers to measurement rows.
+- Both FKs `ON DELETE SET NULL` — deleting the STD row (rare, admin
+  action) preserves the batch itself; the calibration link just goes
+  away.
+- `measurement.batch_id` also `ON DELETE SET NULL` — deleting a batch
+  strands its members (they still exist, just uncategorized).
+
+### Storage identity (RECORDED, v1.1)
+STD.mea and BLANK.mea are STORED IDENTICALLY to sample .mea files:
+same `measurement` / `mea_file` / `mea_preview` / `run_telemetry`
+rows, same zstd compression, same preview PNG. The only distinguishing
+field is `sample_type` (`'blank'` / `'standard'`); the batch table
+holds POINTERS to their `mea_id`s, never a second copy of the bytes.
+Rationale: uniform ingest treatment (STD/BLANK have their own RIP,
+peaks, telemetry — needed anyway), uniform SHA-256 dedup domain,
+zero `if is_blank` branches in the parser/preview/render code.
+
+### Auto-detection at ingest
+When ingesting a file:
+  1. Look up (or create) `batch` where label = folder_name.
+  2. Link `measurement.batch_id`.
+  3. If `sample_type == 'standard'` and batch has no std_mea_id yet,
+     set std_mea_id to this measurement.
+  4. Same for BLANK.
+Existing pointers are NEVER overwritten by ingest — an admin can
+re-designate STD/BLANK manually via the admin app (audit-logged).
+
+### `sample_type` classification updates (v1.1)
+`sample_type_from_name()` now recognises additional standard patterns
+seen in real data:
+  - `testmix*` -> standard (matches TestmixHSSub_M[1-5])
+  - `ketone[ _-]?mix` -> standard (matches KETONE MIX 60T)
+plus the v1.0 patterns (calib, calibration, std, standard, blank,
+blind, qc).
+
+### Absence tolerated (§2c leniency principle)
+Legacy folders often lack BLANK, STD, or both. The schema NEVER
+requires them — every FK is nullable. Consequences by folder state:
+  - Both present: RI axis available (via STD), baseline subtraction
+    available (via BLANK).
+  - STD only: RI axis available; no baseline subtraction.
+  - BLANK only: no RI axis; baseline subtraction available.
+  - Neither: heatmaps stay in raw RT_s coordinates; samples remain
+    fully searchable and browsable.
+
+### Integrity checks (in tests/test_integrity_scan.py)
+- `batch.std_mea_id`, if set, points to a measurement whose
+  `sample_type = 'standard'`.
+- `batch.blank_mea_id`, if set, points to a measurement whose
+  `sample_type = 'blank'`.
+- Both calibration files are themselves members of the batch they
+  calibrate (their `measurement.batch_id` points back to the batch).
+
+### Interaction with §18 (out-of-scope analysis)
+When the external analysis tool computes RI values by detecting the 6
+ketone peaks in the STD, results can be written back to a future
+`ri_anchor` table (`std_mea_id, compound_name, reference_ri,
+detected_rt_s, ...`) via the same §18 write-back discipline
+(analysis_ver, never-overwrite protection). Not built in v1.1 — the
+`batch` structure just enables it.

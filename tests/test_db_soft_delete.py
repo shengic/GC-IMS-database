@@ -1,4 +1,4 @@
-"""Soft-delete policy per DESIGN §15. Version 1.0.
+"""Soft-delete policy per DESIGN §15. Version 1.1.
 
 Measurements are NEVER physically deleted — retired=1 marks them dead.
 Search/list queries must default to `WHERE retired = 0`; admin UI has

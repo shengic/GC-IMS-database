@@ -1,5 +1,5 @@
 """`mea_preview` correctness: max_pool preserves peaks, npz roundtrips,
-render_heatmap_png emits valid PNG, thumb respects target width. Version 1.0."""
+render_heatmap_png emits valid PNG, thumb respects target width. Version 1.1."""
 import io
 import numpy as np
 import pytest

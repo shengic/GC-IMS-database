@@ -1,4 +1,4 @@
-"""`promote()` covers all 6 firmware generations without raising. Version 1.0.
+"""`promote()` covers all 6 firmware generations without raising. Version 1.1.
 
 Pins the DESIGN §2f HEADER_KEY_ALIASES table: every promoted column must
 be filled OR left None (never raise) for each firmware generation. Also
@@ -168,6 +168,9 @@ class TestSampleTypeClassification:
         ("Blank-Air", "blank"),
         ("Blind_Luft_0µgL-1", "blank"),
         ("Calibration", "standard"),
+        ("TestmixHSSub_M5_54ugL-1", "standard"),
+        ("KETONE MIX 60T", "standard"),
+        ("Ketone_Mix_6_C4-C9", "standard"),
         ("QC-batch-A", "qc"),
         ("Tea-1-1", "sample"),
         ("103BY01086-1", "sample"),

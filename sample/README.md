@@ -1,4 +1,4 @@
-<!-- Version 1.0 -->
+<!-- Version 1.1 -->
 # Sample .mea inventory
 
 The cross-validation files are NOT committed (size). Originals live on

@@ -1,4 +1,4 @@
-"""Full-scan integrity audit against the LIVE `gc-ims_database`. Version 1.0.
+"""Full-scan integrity audit against the LIVE `gc-ims_database`. Version 1.1.
 
 Every test is read-only and asserts an invariant that must hold for
 correctly-ingested data. Run periodically (post-batch, nightly, after
@@ -358,6 +358,48 @@ class TestHeaderRegistryCompleteness:
             registered = {r[0] for r in c.fetchall()}
         missing = seen - registered
         assert not missing, f"unregistered header keys: {sorted(missing)[:20]}"
+
+
+# ---------- batch (§21) ----------
+
+class TestBatchConsistency:
+    def test_batch_std_points_at_standard(self, db_conn):
+        """A batch's std_mea_id must reference a measurement with
+        sample_type='standard' (else the auto-classifier or batch admin
+        made a mistake)."""
+        with db_conn.cursor() as c:
+            c.execute("""SELECT b.batch_id, b.label, m.mea_id, m.sample_type
+                         FROM batch b JOIN measurement m ON m.mea_id = b.std_mea_id
+                         WHERE b.std_mea_id IS NOT NULL
+                           AND m.sample_type != 'standard'""")
+            bad = c.fetchall()
+            assert not bad, f"batches with std_mea_id pointing at non-standard: {bad}"
+
+    def test_batch_blank_points_at_blank(self, db_conn):
+        with db_conn.cursor() as c:
+            c.execute("""SELECT b.batch_id, b.label, m.mea_id, m.sample_type
+                         FROM batch b JOIN measurement m ON m.mea_id = b.blank_mea_id
+                         WHERE b.blank_mea_id IS NOT NULL
+                           AND m.sample_type != 'blank'""")
+            bad = c.fetchall()
+            assert not bad, f"batches with blank_mea_id pointing at non-blank: {bad}"
+
+    def test_std_and_blank_belong_to_same_batch(self, db_conn):
+        """A batch's calibration files should themselves be members of that
+        batch (their measurement.batch_id points back to the batch)."""
+        with db_conn.cursor() as c:
+            c.execute("""SELECT b.batch_id, b.label, b.std_mea_id, m.batch_id
+                         FROM batch b JOIN measurement m ON m.mea_id = b.std_mea_id
+                         WHERE b.std_mea_id IS NOT NULL
+                           AND (m.batch_id IS NULL OR m.batch_id != b.batch_id)""")
+            bad = c.fetchall()
+            assert not bad, f"std files not linked back to their batch: {bad}"
+            c.execute("""SELECT b.batch_id, b.label, b.blank_mea_id, m.batch_id
+                         FROM batch b JOIN measurement m ON m.mea_id = b.blank_mea_id
+                         WHERE b.blank_mea_id IS NOT NULL
+                           AND (m.batch_id IS NULL OR m.batch_id != b.batch_id)""")
+            bad = c.fetchall()
+            assert not bad, f"blank files not linked back to their batch: {bad}"
 
 
 # ---------- dedup ----------

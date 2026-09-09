@@ -1,4 +1,4 @@
-"""`find_rip` correctness. Version 1.0.
+"""`find_rip` correctness. Version 1.1.
 
 VOCal-compatible: argmax over RT=0 row after skipping the first 200 drift
 samples. Tests pin the algorithm's contract from DESIGN §5b.

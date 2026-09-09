@@ -1,4 +1,4 @@
-"""Convert docs/專案報告_v1.0.md to .docx (Word) and optionally .pdf. Version 1.0.
+"""Convert docs/專案報告_v1.1.md to .docx (Word) and optionally .pdf. Version 1.1.
 
 Uses pypandoc-binary — no external pandoc install required. Run:
 
@@ -61,8 +61,8 @@ def convert_to_pdf(md_path: Path, pdf_path: Path):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument("--input", default="docs/專案報告_v1.0.md",
-                    help="markdown input (default: docs/專案報告_v1.0.md)")
+    ap.add_argument("--input", default="docs/專案報告_v1.1.md",
+                    help="markdown input (default: docs/專案報告_v1.1.md)")
     ap.add_argument("--outdir", default="docs",
                     help="output directory (default: docs/)")
     ap.add_argument("--pdf", action="store_true",

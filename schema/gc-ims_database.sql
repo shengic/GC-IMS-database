@@ -1,6 +1,6 @@
 -- ============================================================
 -- GC-IMS .mea measurement database (MySQL 8.0+)
--- Version 1.0
+-- Version 1.1
 -- Deployment variant: targets database `gc-ims_database` (with hyphen).
 -- Identical to gcims_schema.sql (the canonical source) except for the
 -- database name. Use this file to bootstrap the production DB directly;
@@ -361,6 +361,32 @@ ALTER TABLE measurement
         CHECK (rip_drift_index IS NULL OR rip_drift_index < n_drift_points),
     ADD CONSTRAINT ck_meas_matrix_dtype
         CHECK (matrix_dtype IN ('int16le'));
+
+-- Batch: coordinated set of measurements (typically one folder / one
+-- campaign). std_mea_id and blank_mea_id are pointers to calibration
+-- measurements; both nullable to tolerate folders lacking one or both.
+-- See DESIGN §21 for the design rationale.
+CREATE TABLE batch (
+    batch_id     INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    label        VARCHAR(255) NOT NULL,
+    std_mea_id   BIGINT UNSIGNED NULL,
+    blank_mea_id BIGINT UNSIGNED NULL,
+    created_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    notes        TEXT NULL,
+    UNIQUE KEY uk_batch_label (label),
+    KEY idx_std_mea (std_mea_id),
+    KEY idx_blank_mea (blank_mea_id),
+    CONSTRAINT fk_batch_std   FOREIGN KEY (std_mea_id)
+        REFERENCES measurement(mea_id) ON DELETE SET NULL,
+    CONSTRAINT fk_batch_blank FOREIGN KEY (blank_mea_id)
+        REFERENCES measurement(mea_id) ON DELETE SET NULL
+) ENGINE=InnoDB;
+
+ALTER TABLE measurement
+    ADD COLUMN batch_id INT UNSIGNED NULL,
+    ADD KEY idx_batch (batch_id),
+    ADD CONSTRAINT fk_meas_batch FOREIGN KEY (batch_id)
+        REFERENCES batch(batch_id) ON DELETE SET NULL;
 
 -- ------------------------------------------------------------
 -- 10. Header key registry: tracks every header key ever seen.

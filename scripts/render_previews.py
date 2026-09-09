@@ -1,4 +1,4 @@
-"""Regenerate mea_preview.heatmap_png and thumb_png from preview_npz. Version 1.0.
+"""Regenerate mea_preview.heatmap_png and thumb_png from preview_npz. Version 1.1.
 
 Implements the DESIGN §5 step 8 backfill pattern: reads only preview_npz
 (and rip_drift_index for RIP-normalized X axis), touches only the two

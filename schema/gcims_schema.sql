@@ -1,6 +1,6 @@
 -- ============================================================
 -- GC-IMS .mea measurement database (MySQL 8.0+)
--- Version 1.0
+-- Version 1.1
 -- Designed from actual G.A.S. FlavourSpec .mea structure:
 --   text header (latin-1 key=value, ~60 keys) + int16 LE matrix
 --   e.g. 8571 spectra x 4500 drift points, 150 kHz, 30 ms sweep
@@ -364,6 +364,44 @@ ALTER TABLE measurement
         CHECK (rip_drift_index IS NULL OR rip_drift_index < n_drift_points),
     ADD CONSTRAINT ck_meas_matrix_dtype
         CHECK (matrix_dtype IN ('int16le'));
+
+-- ------------------------------------------------------------
+-- 14. Batch: a coordinated set of measurements from one experimental
+-- campaign (typically one folder, one day, one instrument, one method).
+-- Provides the anchor for RI calibration (via std_mea_id) and baseline
+-- subtraction / QC (via blank_mea_id).
+--
+-- Design decision (v1.1): a measurement belongs to AT MOST ONE batch,
+-- but a batch's std/blank pointers are BOTH nullable — legacy folders
+-- often lack one or both calibration files, and the system must
+-- degrade gracefully (§2c leniency principle).
+--
+-- Storage note: STD.mea and BLANK.mea are ordinary measurements —
+-- stored in `measurement` + `mea_file` + `mea_preview` like any sample.
+-- The batch table only holds POINTERS to their mea_ids, not a second
+-- copy of the bytes.
+-- ------------------------------------------------------------
+CREATE TABLE batch (
+    batch_id     INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    label        VARCHAR(255) NOT NULL,       -- e.g. "20260826_茶葉 樣品"
+    std_mea_id   BIGINT UNSIGNED NULL,        -- the batch's Ketone Mix STD (may be absent)
+    blank_mea_id BIGINT UNSIGNED NULL,        -- the batch's BLANK (may be absent)
+    created_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    notes        TEXT NULL,
+    UNIQUE KEY uk_batch_label (label),
+    KEY idx_std_mea (std_mea_id),
+    KEY idx_blank_mea (blank_mea_id),
+    CONSTRAINT fk_batch_std   FOREIGN KEY (std_mea_id)
+        REFERENCES measurement(mea_id) ON DELETE SET NULL,
+    CONSTRAINT fk_batch_blank FOREIGN KEY (blank_mea_id)
+        REFERENCES measurement(mea_id) ON DELETE SET NULL
+) ENGINE=InnoDB;
+
+ALTER TABLE measurement
+    ADD COLUMN batch_id INT UNSIGNED NULL,
+    ADD KEY idx_batch (batch_id),
+    ADD CONSTRAINT fk_meas_batch FOREIGN KEY (batch_id)
+        REFERENCES batch(batch_id) ON DELETE SET NULL;
 
 -- ------------------------------------------------------------
 -- 10. Header key registry: tracks every header key ever seen.

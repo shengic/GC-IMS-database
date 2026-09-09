@@ -1,4 +1,4 @@
-# Version 1.0
+# Version 1.1
 config.ini
 *.env
 __pycache__/
@@ -14,3 +14,4 @@ mea data/
 .pytest_cache/
 _ref/
 _smoke/
+docs/references/

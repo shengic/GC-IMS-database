@@ -1,4 +1,4 @@
-<!-- Version 1.0 -->
+<!-- Version 1.1 -->
 # GC-IMS 量測資料庫 — 設計說明(白話版)
 
 本文件與 `schema/gcims_schema.sql` 搭配閱讀,記錄每一個設計決策的「為什麼」。
@@ -503,3 +503,49 @@ SQL 工具直連修改,不會留稽核記錄(MySQL 社群版沒有伺服器層
 誠實限定:舊檔鑑定受當年記錄貧乏所限(老韌體連管柱都沒記),
 結果會帶版本與信心度標注;**現在**補的人工註記(批次標註功能)
 就是在為**未來**的舊檔鑑定品質鋪路。
+
+
+## 21. 批次（batch）：連結樣品與其校正檔（新增於 v1.1）
+
+### 現場工作流程觀察
+每個資料夾內都有一份 BLANK.mea 與一份 STD.mea（Ketone Mix 6，C4–C9）
+用於為該資料夾內其餘的樣品做熱圖座標校正。STD 提供 GC 保留時間（RT）
+轉換為保留指數（RI）的錨定點；BLANK 用於背景扣除與品質確認。
+
+### 新增資料表 `batch`
+- `batch_id` 主鍵、`label` 唯一（通常等於 folder_name）
+- `std_mea_id` 與 `blank_mea_id` 可為 NULL，指向 measurement 表的量測
+- `measurement.batch_id` 也新增為外部鍵指向 batch
+
+### STD 與 BLANK 的儲存方式
+**與樣品完全相同**——同樣寫入 measurement / mea_file / mea_preview /
+run_telemetry 四張表，同樣經 zstd 壓縮，同樣產生預覽 PNG。
+差異僅在 `sample_type` 欄位（`standard` / `blank`）。batch 表僅
+儲存 `mea_id` 的指標，絕不重複儲存原始檔案的位元組。
+
+### 匯入時的自動偵測
+匯入 .mea 檔時：
+  1. 依 folder_name 找出（或建立）對應的 batch
+  2. 將 measurement.batch_id 指向該 batch
+  3. 若此檔為 `sample_type='standard'` 且 batch 尚無 std 指標，設之
+  4. 若此檔為 `sample_type='blank'` 且 batch 尚無 blank 指標，設之
+既有指標不會被匯入程序覆寫；管理員可透過管理程式手動改指定。
+
+### `sample_type` 分類規則更新（v1.1）
+`sample_type_from_name()` 新增可辨識的標準品命名模式：
+  - `testmix*` -> standard（對應 TestmixHSSub_M[1-5]）
+  - `ketone[ _-]?mix` -> standard（對應 KETONE MIX 60T）
+仍相容 v1.0 的舊模式（calib、standard、std、blank、blind、qc）。
+
+### 缺件仍可接受（§2c 寬容原則）
+歷史資料夾可能缺 BLANK、缺 STD 或兩者皆缺。所有 FK 皆為 nullable，
+不會拒絕匯入。功能依可用性遞減：
+  - 兩者皆有：RI 軸可用、可背景扣除
+  - 僅有 STD：RI 軸可用
+  - 僅有 BLANK：可背景扣除
+  - 兩者皆無：熱圖維持原始 RT_s 座標，但仍可搜尋與瀏覽
+
+### 完整性檢查（在 tests/test_integrity_scan.py）
+- `batch.std_mea_id`（若非空）必須指向 sample_type='standard' 的列
+- `batch.blank_mea_id`（若非空）必須指向 sample_type='blank' 的列
+- 校正檔必須本身也屬於它們所校正的那個 batch
